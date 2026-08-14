@@ -2,6 +2,7 @@ use crate::common::Signal;
 use crate::common::Tid;
 use crate::conn::Connection;
 use crate::protocol::commands::Command;
+use crate::protocol::ConsoleOutput;
 use crate::protocol::Packet;
 use crate::protocol::ResponseWriter;
 use crate::protocol::SpecificIdKind;
@@ -232,6 +233,29 @@ impl<T: Target, C: Connection> GdbStubImpl<T, C> {
             Command::Wasm(cmd) => self.handle_wasm(res, target, cmd),
             // in the worst case, the command could not be parsed...
             Command::Unknown(cmd) => {
+                // If the target implements the `UnknownPacket` extension, give
+                // it first crack at the packet (e.g. for debugger-specific
+                // packets like Delve/rr's `qRRCmd`).
+                if let Some(ops) = target.support_unknown_packet() {
+                    crate::__dead_code_marker!("unknown_packet", "impl");
+
+                    let mut write_err: Option<InternalError<T::Error, C::Error>> = None;
+                    let mut callback = |data: &[u8]| {
+                        if write_err.is_none() {
+                            if let Err(e) = res.write_binary(data) {
+                                write_err = Some(e.into());
+                            }
+                        }
+                    };
+
+                    ops.handle_unknown_packet(cmd, ConsoleOutput::new(&mut callback))
+                        .map_err(InternalError::TargetError)?;
+                    if let Some(e) = write_err {
+                        return Err(e);
+                    }
+                    return Ok(HandlerStatus::Handled);
+                }
+
                 // HACK: if the user accidentally sends a resume command to a
                 // target without resume support, inform them of their mistake +
                 // return a dummy stop reason.

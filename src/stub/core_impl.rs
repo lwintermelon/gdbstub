@@ -176,10 +176,10 @@ impl<T: Target, C: Connection> GdbStubImpl<T, C> {
                     Err(e) => return Err(e),
                 };
 
-                // every response needs to be flushed, _except_ for the response to a kill
-                // packet, but ONLY when extended mode is NOT implemented.
+                // Don't flush on kill: the stub closes the connection without
+                // a reply (flushing would send an empty packet).
                 let is_kill = matches!(disconnect_reason, Some(DisconnectReason::Kill));
-                if !(target.support_extended_mode().is_none() && is_kill) {
+                if !is_kill {
                     res.flush()?;
                 }
 

@@ -165,7 +165,7 @@ impl<'a, C: Connection + 'a> ResponseWriter<'a, C> {
     }
 
     /// Write a single byte as a hex string (two ascii chars)
-    fn write_hex(&mut self, byte: u8) -> Result<(), Error<C::Error>> {
+    pub(crate) fn write_hex(&mut self, byte: u8) -> Result<(), Error<C::Error>> {
         for &digit in [(byte & 0xf0) >> 4, byte & 0x0f].iter() {
             let c = match digit {
                 0..=9 => b'0' + digit,

@@ -305,7 +305,8 @@ impl<T: Target, C: Connection> GdbStubImpl<T, C> {
         signal: Signal,
     ) -> Result<(), Error<T::Error, C::Error>> {
         res.write_str("T")?;
-        res.write_num(signal.0)?;
+        // The signal must be exactly two hex digits.
+        res.write_hex(signal.0)?;
 
         if let Some(tid) = tid {
             self.current_mem_tid = tid;

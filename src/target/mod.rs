@@ -789,6 +789,14 @@ pub trait Target {
     fn support_wasm(&mut self) -> Option<ext::wasm::WasmOps<'_, Self>> {
         None
     }
+
+    /// Support for handling packets that `gdbstub` does not recognize.
+    #[inline(always)]
+    fn support_unknown_packet(
+        &mut self,
+    ) -> Option<ext::unknown_packet::UnknownPacketOps<'_, Self>> {
+        None
+    }
 }
 
 macro_rules! __delegate {
@@ -859,6 +867,7 @@ macro_rules! impl_dyn_target {
             __delegate_support!(section_offsets);
             __delegate_support!(target_description_xml_override);
             __delegate_support!(tracepoints);
+            __delegate_support!(unknown_packet);
             __delegate_support!(wasm);
         }
     };

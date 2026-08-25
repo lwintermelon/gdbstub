@@ -343,8 +343,7 @@ impl<T: Target, C: Connection> GdbStubImpl<T, C> {
 
                         let should_terminate = ops.kill(pid).handle_error()?;
                         if should_terminate.into_bool() {
-                            // manually write OK, since we need to return a DisconnectReason
-                            res.write_str("OK")?;
+                            // No reply: the connection close is itself the signal.
                             HandlerStatus::Disconnect(DisconnectReason::Kill)
                         } else {
                             HandlerStatus::NeedsOk

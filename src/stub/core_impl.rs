@@ -2,6 +2,7 @@ use crate::common::Signal;
 use crate::common::Tid;
 use crate::conn::Connection;
 use crate::protocol::commands::Command;
+use crate::protocol::ConsoleOutput;
 use crate::protocol::Packet;
 use crate::protocol::ResponseWriter;
 use crate::protocol::SpecificIdKind;
@@ -176,10 +177,10 @@ impl<T: Target, C: Connection> GdbStubImpl<T, C> {
                     Err(e) => return Err(e),
                 };
 
-                // every response needs to be flushed, _except_ for the response to a kill
-                // packet, but ONLY when extended mode is NOT implemented.
+                // Don't flush on kill: the stub closes the connection without
+                // a reply (flushing would send an empty packet).
                 let is_kill = matches!(disconnect_reason, Some(DisconnectReason::Kill));
-                if !(target.support_extended_mode().is_none() && is_kill) {
+                if !is_kill {
                     res.flush()?;
                 }
 
@@ -232,6 +233,29 @@ impl<T: Target, C: Connection> GdbStubImpl<T, C> {
             Command::Wasm(cmd) => self.handle_wasm(res, target, cmd),
             // in the worst case, the command could not be parsed...
             Command::Unknown(cmd) => {
+                // If the target implements the `UnknownPacket` extension, give
+                // it first crack at the packet (e.g. for debugger-specific
+                // packets like Delve/rr's `qRRCmd`).
+                if let Some(ops) = target.support_unknown_packet() {
+                    crate::__dead_code_marker!("unknown_packet", "impl");
+
+                    let mut write_err: Option<InternalError<T::Error, C::Error>> = None;
+                    let mut callback = |data: &[u8]| {
+                        if write_err.is_none() {
+                            if let Err(e) = res.write_binary(data) {
+                                write_err = Some(e.into());
+                            }
+                        }
+                    };
+
+                    ops.handle_unknown_packet(cmd, ConsoleOutput::new(&mut callback))
+                        .map_err(InternalError::TargetError)?;
+                    if let Some(e) = write_err {
+                        return Err(e);
+                    }
+                    return Ok(HandlerStatus::Handled);
+                }
+
                 // HACK: if the user accidentally sends a resume command to a
                 // target without resume support, inform them of their mistake +
                 // return a dummy stop reason.

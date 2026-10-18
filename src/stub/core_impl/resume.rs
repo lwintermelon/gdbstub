@@ -163,6 +163,9 @@ impl<T: Target, C: Connection> GdbStubImpl<T, C> {
             Error = T::Error,
         >,
         actions: &Actions<'_>,
+        // The thread selected by `Hg`: what an action without a thread-id
+        // applies to for the operations that cannot mean "every thread".
+        selected_tid: Tid,
     ) -> Result<(), Error<T::Error, C::Error>> {
         ops.clear_resume_actions().map_err(Error::TargetError)?;
 
@@ -210,10 +213,14 @@ impl<T: Target, C: Connection> GdbStubImpl<T, C> {
                     };
 
                     match action.thread.map(|thread| thread.tid) {
-                        // An action with no thread-id matches all threads
+                        // An action with no thread-id applies to every thread
+                        // (GDB manual, `vCont`). Stepping "all threads" has no
+                        // single meaning, but the selected thread is the only
+                        // sensible interpretation — and refusing used to kill
+                        // the whole session over a packet the protocol allows.
                         None | Some(SpecificIdKind::All) => {
-                            error!("GDB client sent 'step' as default resume action");
-                            return Err(Error::PacketUnexpected);
+                            ops.set_resume_action_step(selected_tid, signal)
+                                .map_err(Error::TargetError)?;
                         }
                         Some(SpecificIdKind::WithId(tid)) => {
                             ops.set_resume_action_step(tid, signal)
@@ -226,10 +233,14 @@ impl<T: Target, C: Connection> GdbStubImpl<T, C> {
                     let ops = ops.support_range_step().unwrap();
 
                     match action.thread.map(|thread| thread.tid) {
-                        // An action with no thread-id matches all threads
+                        // Same rule as `Step`: an action without a thread-id
+                        // means "all threads", carried out on the selected one.
                         None | Some(SpecificIdKind::All) => {
-                            error!("GDB client sent 'range step' as default resume action");
-                            return Err(Error::PacketUnexpected);
+                            let start = start.decode().map_err(|_| Error::TargetMismatch)?;
+                            let end = end.decode().map_err(|_| Error::TargetMismatch)?;
+
+                            ops.set_resume_action_range_step(selected_tid, start, end)
+                                .map_err(Error::TargetError)?;
                         }
                         Some(SpecificIdKind::WithId(tid)) => {
                             let start = start.decode().map_err(|_| Error::TargetMismatch)?;
@@ -278,7 +289,9 @@ impl<T: Target, C: Connection> GdbStubImpl<T, C> {
     ) -> Result<HandlerStatus, Error<T::Error, C::Error>> {
         match ops {
             ResumeOps::SingleThread(ops) => Self::do_vcont_single_thread(ops, &actions)?,
-            ResumeOps::MultiThread(ops) => Self::do_vcont_multi_thread(ops, &actions)?,
+            ResumeOps::MultiThread(ops) => {
+                Self::do_vcont_multi_thread(ops, &actions, self.current_mem_tid)?
+            }
         };
 
         Ok(HandlerStatus::DeferredStopReason)
